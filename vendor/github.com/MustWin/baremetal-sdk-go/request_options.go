@@ -193,6 +193,7 @@ type LaunchDBSystemOptions struct {
 	DataStoragePercentage int            `header:"-" json:"dataStoragePercentage,omitempty" url:"-"`
 	DiskRedundancy        DiskRedundancy `header:"-" json:"diskRedundancy,omitempty" url:"-"`
 	Domain                string         `header:"-" json:"domain,omitempty" url:"-"`
+	HostSerial            string         `header:"opc-host-serial,omitempty" json:"-" url:"-"`
 }
 
 type CreateDBHomeOptions struct {

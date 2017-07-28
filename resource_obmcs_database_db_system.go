@@ -171,6 +171,13 @@ func DBSystemResource() *schema.Resource {
 				Optional: true,
 				ForceNew: true,
 			},
+			//For a fake DBSystem this should be set to "FAKEHOSTSERIAL"
+			//Works in SDK R1 tenancy Will need to be whitelisted by DBAAS team for Prod Tenancy
+			"host_serial": {
+				Type: schema.TypeString,
+				Optional: true,
+				ForceNew: true,
+			},
 
 			//Computed
 			"id": {
@@ -325,6 +332,9 @@ func (s *DBSystemResourceCrud) Create() (e error) {
 	}
 
 	opts := &baremetal.LaunchDBSystemOptions{}
+	if hostSerial, ok := s.D.GetOk("host_serial"); ok {
+		opts.HostSerial = hostSerial.(string)
+	}
 	if backupSubnetId, ok := s.D.GetOk("backup_subnet_id"); ok {
 		opts.BackupSubnetId = backupSubnetId.(string)
 	}
