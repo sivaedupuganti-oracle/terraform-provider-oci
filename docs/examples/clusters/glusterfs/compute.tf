@@ -8,7 +8,7 @@ resource "oci_core_instance" "GlusterServerInstance" {
   subnet_id = "${oci_core_subnet.SubnetAD1.id}"
   metadata {
     ssh_authorized_keys = "${var.ssh_public_key}"
-    user_data = "${base64encode(file(var.BootStrapFile))}"
+    user_data = "${base64encode(file(var.ServerBootStrapFile))}"
   }
 }
 
@@ -22,7 +22,7 @@ resource "oci_core_instance" "GlusterServerInstance2" {
   subnet_id = "${oci_core_subnet.SubnetAD2.id}"
   metadata {
     ssh_authorized_keys = "${var.ssh_public_key}"
-    user_data = "${base64encode(file(var.BootStrapFile))}"
+    user_data = "${base64encode(file(var.ServerBootStrapFile))}"
   }
 }
 
@@ -36,7 +36,7 @@ resource "oci_core_instance" "GlusterServerInstance3" {
   subnet_id = "${oci_core_subnet.SubnetAD3.id}"
   metadata {
     ssh_authorized_keys = "${var.ssh_public_key}"
-    user_data = "${base64encode(file(var.BootStrapFile))}"
+    user_data = "${base64encode(file(var.ServerBootStrapFile))}"
   }
 }
 
@@ -51,7 +51,7 @@ resource "oci_core_instance" "GlusterClientInstance" {
   subnet_id = "${oci_core_subnet.SubnetAD1.id}"
   metadata {
     ssh_authorized_keys = "${var.ssh_public_key}"
-    user_data = "${base64encode(file(var.BootStrapFile))}"
+    user_data = "${base64encode(file(var.ClientBootStrapFile))}"
   }
 }
 
@@ -65,7 +65,7 @@ resource "oci_core_instance" "GlusterClientInstance2" {
   subnet_id = "${oci_core_subnet.SubnetAD2.id}"
   metadata {
     ssh_authorized_keys = "${var.ssh_public_key}"
-    user_data = "${base64encode(file(var.BootStrapFile))}"
+    user_data = "${base64encode(file(var.ClientBootStrapFile))}"
   }
 }
 
@@ -79,7 +79,7 @@ resource "oci_core_instance" "GlusterClientInstance3" {
   subnet_id = "${oci_core_subnet.SubnetAD3.id}"
   metadata {
     ssh_authorized_keys = "${var.ssh_public_key}"
-    user_data = "${base64encode(file(var.BootStrapFile))}"
+    user_data = "${base64encode(file(var.ClientBootStrapFile))}"
   }
 }
 

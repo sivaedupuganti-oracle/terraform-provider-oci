@@ -7,8 +7,8 @@
 ## GlusterFS Infrastructure
 This configuration creates a glusterfs volume that is replicated across 3 GlusterFS servers.
 
-It creates a VNC with a route table, internet gateway, and security list.
-The VNC spans 3 ADs with each AD containing a subnet and 2 instances: a GlusterFS server and a GlusterFS client. 
+It creates a VCN with a route table, internet gateway, and security list.
+The VCN spans 3 ADs with each AD containing a subnet and 2 instances: a GlusterFS server and a GlusterFS client. 
 
 ### Using this example
 * Update env-vars with the required information. Most examples use the same set of environment variables so you only need to do this once.

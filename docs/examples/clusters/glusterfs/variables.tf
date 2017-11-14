@@ -32,6 +32,10 @@ variable "ClientInstanceImage" {
   default = "Oracle-Linux-7.4-2017.10.25-0"
 }
 
-variable "BootStrapFile" {
-  default = "./userdata/bootstrap"
+variable "ServerBootStrapFile" {
+  default = "./userdata/bootstrap-server.sh"
+}
+
+variable "ClientBootStrapFile" {
+  default = "./userdata/bootstrap-client.sh"
 }

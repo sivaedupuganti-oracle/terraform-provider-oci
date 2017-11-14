@@ -1,9 +1,5 @@
-variable "VPC-CIDR" {
-  default = "10.0.0.0/16"
-}
-
 resource "oci_core_virtual_network" "CompleteVCN" {
-  cidr_block = "${var.VPC-CIDR}"
+  cidr_block = "10.0.0.0/16"
   compartment_id = "${var.compartment_ocid}"
   dns_label = "${var.DnsLabel}"
   display_name = "CompleteVCN"
