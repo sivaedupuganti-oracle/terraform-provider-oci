@@ -3,21 +3,20 @@
 package provider
 
 import (
+	"fmt"
+	"runtime"
 	"testing"
 
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/hashicorp/terraform/terraform"
-	"github.com/oracle/bmcs-go-sdk"
+	oci_common "github.com/oracle/oci-go-sdk/common"
 	"github.com/stretchr/testify/assert"
 )
 
-var testAccClient *baremetal.Client
 var testAccProvider *schema.Provider
 var testAccProviders map[string]terraform.ResourceProvider
 
 func init() {
-	testAccClient = GetTestProvider().client
-
 	testAccProvider = Provider(func(d *schema.ResourceData) (interface{}, error) {
 		return GetTestProvider(), nil
 	}).(*schema.Provider)
@@ -28,13 +27,6 @@ func init() {
 }
 
 func testProviderConfig() string {
-	// We should check for "compartment_ocid" to be consistent with our README steps
-	// Some folks might still be using the old "compartment_id" name in their environment, so don't break them
-	var compartmentId string
-	if compartmentId = getEnvSetting("compartment_id", "compartment_id"); compartmentId == "compartment_id" {
-		compartmentId = getRequiredEnvSetting("compartment_ocid")
-	}
-
 	return `
 	provider "oci" {
 		tenancy_ocid = "ocid.tenancy.aaaa"
@@ -43,10 +35,6 @@ func testProviderConfig() string {
 		private_key_path = "/home/foo/private_key.pem"
 		private_key_password = "password"
 		region = "us-phoenix-1"
-	}
-
-	variable "compartment_id" {
-		default = "` + compartmentId + `"
 	}
 
 	variable "tenancy_ocid" {
@@ -66,6 +54,24 @@ func testProviderConfig() string {
 	}
 
 	`
+}
+
+func getCompartmentIDForLegacyTests() string {
+	var compartmentId string
+	if compartmentId = getEnvSetting("compartment_ocid", "compartment_ocid"); compartmentId == "compartment_ocid" {
+		compartmentId = getRequiredEnvSetting("compartment_id_for_create")
+	}
+	return compartmentId
+}
+
+func legacyTestProviderConfig() string {
+	// Use the same config as the generated tests.
+	config := testProviderConfig()
+
+	// Add the 'compartment_id' used by the legacy tests.
+	return config + `variable "compartment_id" {
+		default = "` + getCompartmentIDForLegacyTests() + `"
+	}`
 }
 
 var subnetConfig = `
@@ -94,10 +100,12 @@ var instanceConfig = subnetConfig + `
 variable "InstanceImageOCID" {
   type = "map"
   default = {
-    // Oracle-provided image "Oracle-Linux-7.4-2017.12.18-0"
-    us-phoenix-1 = "ocid1.image.oc1.phx.aaaaaaaasc56hnpnx7swoyd2fw5gyvbn3kcdmqc2guiiuvnztl2erth62xnq"
-    us-ashburn-1 = "ocid1.image.oc1.iad.aaaaaaaaxrqeombwty6jyqgk3fraczdd63bv66xgfsqka4ktr7c57awr3p5a"
-    eu-frankfurt-1 = "ocid1.image.oc1.eu-frankfurt-1.aaaaaaaayxmzu6n5hsntq4wlffpb4h6qh6z3uskpbm5v3v4egqlqvwicfbyq"
+	// See https://docs.us-phoenix-1.oraclecloud.com/images/
+	// Oracle-provided image "Oracle-Linux-7.4-2018.02.21-1"
+	us-phoenix-1 = "ocid1.image.oc1.phx.aaaaaaaaupbfz5f5hdvejulmalhyb6goieolullgkpumorbvxlwkaowglslq"
+	us-ashburn-1 = "ocid1.image.oc1.iad.aaaaaaaajlw3xfie2t5t52uegyhiq2npx7bqyu4uvi2zyu3w3mqayc2bxmaa"
+	eu-frankfurt-1 = "ocid1.image.oc1.eu-frankfurt-1.aaaaaaaa7d3fsb6272srnftyi4dphdgfjf6gurxqhmv6ileds7ba3m2gltxq"
+	uk-london-1 = "ocid1.image.oc1.uk-london-1.aaaaaaaaa6h6gj6v4n56mqrbgnosskq63blyv2752g36zerymy63cfkojiiq"
   }
 }
 
@@ -171,11 +179,13 @@ resource "oci_core_instance" "t" {
 	compartment_id = "${var.compartment_id}"
 	display_name = "-tf-instance"
 	image = "${var.InstanceImageOCID[var.region]}"
-	shape = "VM.Standard1.8"
+	shape = "VM.Standard1.1"
 	create_vnic_details {
         subnet_id = "${oci_core_subnet.t.id}"
         hostname_label = "testinstance"
         display_name = "-tf-instance-vnic"
+		defined_tags = "${map("${oci_identity_tag_namespace.tag-namespace1.name}.${oci_identity_tag.tag1.name}", "value")}"
+		freeform_tags = { "Department" = "Accounting" }
   	}
 	metadata {
 		ssh_authorized_keys = "${var.ssh_public_key}"
@@ -184,7 +194,7 @@ resource "oci_core_instance" "t" {
 		create = "15m"
 	}
 }
-`
+` + DefinedTagsDependencies
 
 func GetTestProvider() *OracleClients {
 	r := &schema.Resource{
@@ -193,6 +203,7 @@ func GetTestProvider() *OracleClients {
 	d := r.Data(nil)
 	d.SetId(getRequiredEnvSetting("tenancy_ocid"))
 
+	d.Set("auth", getEnvSetting("auth", authAPIKeySetting))
 	d.Set("tenancy_ocid", getRequiredEnvSetting("tenancy_ocid"))
 	d.Set("user_ocid", getRequiredEnvSetting("user_ocid"))
 	d.Set("fingerprint", getRequiredEnvSetting("fingerprint"))
@@ -200,7 +211,6 @@ func GetTestProvider() *OracleClients {
 	d.Set("private_key_password", getEnvSetting("private_key_password", ""))
 	d.Set("private_key", getEnvSetting("private_key", ""))
 	d.Set("region", getEnvSetting("region", "us-phoenix-1"))
-	d.Set("disable_auto_retries", true)
 
 	client, err := ProviderConfig(d)
 	if err != nil {
@@ -211,7 +221,6 @@ func GetTestProvider() *OracleClients {
 
 // This test runs the Provider sanity checks.
 func TestProvider(t *testing.T) {
-
 	// Real client for the sanity check. Makes this more of an acceptance test.
 	client := &OracleClients{}
 	if err := Provider(func(d *schema.ResourceData) (interface{}, error) {
@@ -257,23 +266,69 @@ var testKeyFingerPrint = "b4:8a:7d:54:e6:81:04:b2:fa:ce:ba:55:34:dd:00:00"
 var testTenancyOCID = "ocid1.tenancy.oc1..faketenancy"
 var testUserOCID = "ocid1.user.oc1..fakeuser"
 
-func TestProviderConfig(t *testing.T) {
+func providerConfigTest(t *testing.T, disableRetries bool, skipRequiredField bool, auth string) {
 	r := &schema.Resource{
 		Schema: schemaMap(),
 	}
 	d := r.Data(nil)
 	d.SetId("tenancy_ocid")
-
-	d.Set("tenancy_ocid", testTenancyOCID)
+	d.Set("auth", auth)
+	if !skipRequiredField {
+		d.Set("tenancy_ocid", testTenancyOCID)
+	}
 	d.Set("user_ocid", testUserOCID)
 	d.Set("fingerprint", testKeyFingerPrint)
 	d.Set("private_key", testPrivateKey)
 	//d.Set("private_key_path", "")
 	d.Set("private_key_password", "password")
+	d.Set("region", "us-phoenix-1")
+
+	if disableRetries {
+		d.Set("disable_auto_retries", disableRetries)
+	}
 
 	client, err := ProviderConfig(d)
+
+	switch auth {
+	case authAPIKeySetting, "":
+		if skipRequiredField {
+			assert.Error(t, err, fmt.Sprintf("when auth is set to '%s', tenancy_ocid, user_ocid, and fingerprint are required", authAPIKeySetting))
+			return
+		}
+	case authInstancePrincipalSetting:
+		assert.Regexp(t, "failed to create a new key provider for instance principal.*", err.Error())
+		return
+	default:
+		assert.Error(t, err, fmt.Sprintf("auth must be one of '%s' or '%s'", authAPIKeySetting, authInstancePrincipalSetting))
+		return
+	}
 	assert.Nil(t, err)
 	assert.NotNil(t, client)
-	_, ok := client.(*OracleClients)
+
+	oracleClient, ok := client.(*OracleClients)
 	assert.True(t, ok)
+
+	userAgent := fmt.Sprintf(userAgentFormatter, oci_common.Version(), runtime.Version(), runtime.GOOS, runtime.GOARCH, terraform.VersionString(), Version)
+	testClient := func(c *oci_common.BaseClient) {
+		assert.NotNil(t, c)
+		assert.NotNil(t, c.HTTPClient)
+		assert.Exactly(t, c.UserAgent, userAgent)
+		assert.NotNil(t, c.Obo)
+	}
+
+	assert.Exactly(t, disableAutoRetries, disableRetries)
+	testClient(&oracleClient.blockstorageClient.BaseClient)
+	testClient(&oracleClient.computeClient.BaseClient)
+	testClient(&oracleClient.databaseClient.BaseClient)
+	testClient(&oracleClient.identityClient.BaseClient)
+	testClient(&oracleClient.virtualNetworkClient.BaseClient)
+	testClient(&oracleClient.objectStorageClient.BaseClient)
+	testClient(&oracleClient.loadBalancerClient.BaseClient)
+}
+
+func TestProviderConfig(t *testing.T) {
+	providerConfigTest(t, true, true, authAPIKeySetting)              // ApiKey with required fields + disable auto-retries
+	providerConfigTest(t, false, true, authAPIKeySetting)             // ApiKey without required fields
+	providerConfigTest(t, false, false, authInstancePrincipalSetting) // InstancePrincipal
+	providerConfigTest(t, true, false, "invalid-auth-setting")        // Invalid auth + disable auto-retries
 }

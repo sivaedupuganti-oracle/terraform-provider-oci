@@ -7,25 +7,21 @@ import (
 
 	"github.com/hashicorp/terraform/helper/resource"
 	"github.com/hashicorp/terraform/terraform"
-	"github.com/oracle/bmcs-go-sdk"
+	"github.com/oracle/oci-go-sdk/identity"
 	"github.com/stretchr/testify/suite"
 )
 
 type DatasourceIdentityUserGroupMembershipsTestSuite struct {
 	suite.Suite
-	Client       *baremetal.Client
 	Config       string
-	Provider     terraform.ResourceProvider
 	Providers    map[string]terraform.ResourceProvider
 	ResourceName string
 }
 
 func (s *DatasourceIdentityUserGroupMembershipsTestSuite) SetupTest() {
 	_, tokenFn := tokenize()
-	s.Client = testAccClient
-	s.Provider = testAccProvider
 	s.Providers = testAccProviders
-	s.Config = testProviderConfig() + tokenFn(`
+	s.Config = legacyTestProviderConfig() + tokenFn(`
 	resource "oci_identity_user" "t" {
 		name = "{{.token}}"
 		description = "tf test user"
@@ -63,15 +59,16 @@ func (s *DatasourceIdentityUserGroupMembershipsTestSuite) TestAccIdentityUserGro
 					user_id = "${oci_identity_user.t.id}"
 					group_id = "${oci_identity_group.t.id}"
 				}`,
-				Check: resource.ComposeTestCheckFunc(
+				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(s.ResourceName, "memberships.#", "1"),
-					resource.TestCheckResourceAttr(s.ResourceName, "memberships.0.state", "ACTIVE"),
-					resource.TestCheckResourceAttr(s.ResourceName, "memberships.0.inactive_state", "0"),
+					resource.TestCheckResourceAttr(s.ResourceName, "memberships.0.state", string(identity.UserGroupMembershipLifecycleStateActive)),
 					resource.TestCheckResourceAttrSet(s.ResourceName, "memberships.0.compartment_id"),
 					resource.TestCheckResourceAttrSet(s.ResourceName, "memberships.0.id"),
 					resource.TestCheckResourceAttrSet(s.ResourceName, "memberships.0.user_id"),
 					resource.TestCheckResourceAttrSet(s.ResourceName, "memberships.0.group_id"),
 					resource.TestCheckResourceAttrSet(s.ResourceName, "memberships.0.time_created"),
+					// TODO: This field is not being returned by the service call but is still showing up in the datasource
+					// resource.TestCheckNoResourceAttr(s.ResourceName, "memberships.0.inactive_state"),
 				),
 			},
 			// verify membership by group
@@ -81,7 +78,7 @@ func (s *DatasourceIdentityUserGroupMembershipsTestSuite) TestAccIdentityUserGro
 					compartment_id = "${var.tenancy_ocid}"
 					group_id = "${oci_identity_group.t.id}"
 				}`,
-				Check: resource.ComposeTestCheckFunc(
+				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet(s.ResourceName, "id"),
 					resource.TestCheckResourceAttr(s.ResourceName, "memberships.#", "1"),
 				),
@@ -93,7 +90,7 @@ func (s *DatasourceIdentityUserGroupMembershipsTestSuite) TestAccIdentityUserGro
 					compartment_id = "${var.tenancy_ocid}"
 					user_id = "${oci_identity_user.t.id}"
 				}`,
-				Check: resource.ComposeTestCheckFunc(
+				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(s.ResourceName, "memberships.#", "1"),
 				),
 			},
@@ -108,7 +105,7 @@ func (s *DatasourceIdentityUserGroupMembershipsTestSuite) TestAccIdentityUserGro
 						values = ["${oci_identity_user.t.id}"]
 					}
 				}`,
-				Check: resource.ComposeTestCheckFunc(
+				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(s.ResourceName, "memberships.#", "1"),
 				),
 			},

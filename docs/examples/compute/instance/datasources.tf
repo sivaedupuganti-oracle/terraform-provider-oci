@@ -3,14 +3,12 @@ data "oci_identity_availability_domains" "ADs" {
     compartment_id = "${var.tenancy_ocid}"
 }
 
-# Gets a list of vNIC attachments on the instance
-data "oci_core_vnic_attachments" "InstanceVnics" {
+# Gets the boot volume attachments for each instance
+data "oci_core_boot_volume_attachments" "TFBootVolumeAttachments" {
+    depends_on = ["oci_core_instance.TFInstance"]
+    count = "${var.NumInstances}"
+    availability_domain = "${oci_core_instance.TFInstance.*.availability_domain[count.index]}"
     compartment_id = "${var.compartment_ocid}"
-    availability_domain = "${lookup(data.oci_identity_availability_domains.ADs.availability_domains[var.AD - 1],"name")}"
-    instance_id = "${oci_core_instance.TFInstance.id}"
-} 
 
-# Gets the OCID of the first (default) vNIC
-data "oci_core_vnic" "InstanceVnic" {
-    vnic_id = "${lookup(data.oci_core_vnic_attachments.InstanceVnics.vnic_attachments[0],"vnic_id")}"
+    instance_id = "${oci_core_instance.TFInstance.*.id[count.index]}"
 }

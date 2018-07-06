@@ -3,11 +3,21 @@
 package provider
 
 import (
+	"context"
+	"log"
+	"strings"
+
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/hashicorp/terraform/helper/validation"
-	"github.com/oracle/bmcs-go-sdk"
 
 	"github.com/oracle/terraform-provider-oci/crud"
+
+	oci_core "github.com/oracle/oci-go-sdk/core"
+)
+
+const (
+	IScsiVolumeAttachmentDiscriminator           = "iscsi"
+	ParavirtualizedVolumeAttachmentDiscriminator = "paravirtualized"
 )
 
 func VolumeAttachmentResource() *schema.Resource {
@@ -20,17 +30,13 @@ func VolumeAttachmentResource() *schema.Resource {
 		Read:     readVolumeAttachment,
 		Delete:   deleteVolumeAttachment,
 		Schema: map[string]*schema.Schema{
-			//// Required ////
-			"attachment_type": {
-				Type:         schema.TypeString,
-				Required:     true,
-				ForceNew:     true,
-				ValidateFunc: validation.StringInSlice([]string{"iscsi"}, false),
-			},
-			"compartment_id": {
-				Type:     schema.TypeString,
-				Required: true,
-				ForceNew: true,
+			// Required
+			"attachment_type": { // => "type" (polymorphic discriminator)
+				Type:             schema.TypeString,
+				Required:         true,
+				ForceNew:         true,
+				DiffSuppressFunc: crud.EqualIgnoreCaseSuppressDiff,
+				ValidateFunc:     validation.StringInSlice([]string{IScsiVolumeAttachmentDiscriminator, ParavirtualizedVolumeAttachmentDiscriminator}, true),
 			},
 			"instance_id": {
 				Type:     schema.TypeString,
@@ -42,20 +48,43 @@ func VolumeAttachmentResource() *schema.Resource {
 				Required: true,
 				ForceNew: true,
 			},
-			//// Computed ////
-			"id": {
+
+			// Optional
+			"display_name": {
 				Type:     schema.TypeString,
+				Optional: true,
 				Computed: true,
+				ForceNew: true,
 			},
+			"is_read_only": {
+				Type:     schema.TypeBool,
+				Optional: true,
+				Computed: true,
+				ForceNew: true,
+			},
+			"use_chap": {
+				Type:     schema.TypeBool,
+				Optional: true,
+				Computed: true,
+				ForceNew: true,
+			},
+
+			// Computed
 			"availability_domain": {
 				Type:     schema.TypeString,
 				Computed: true,
 			},
-			"display_name": {
+			"compartment_id": {
+				Type:     schema.TypeString,
+				Computed: true,
+				// The legacy provider required this, but the API no longer accepts it. Keep as optional
+				// to avoid a breaking change. The value will be ignored if defined in the config.
+				Optional: true,
+			},
+			"id": {
 				Type:     schema.TypeString,
 				Computed: true,
 			},
-			// aka lifecycleState
 			"state": {
 				Type:     schema.TypeString,
 				Computed: true,
@@ -64,7 +93,8 @@ func VolumeAttachmentResource() *schema.Resource {
 				Type:     schema.TypeString,
 				Computed: true,
 			},
-			// The following are only computed if type == "iscsi"
+
+			// VolumeAttachment is a polymorphic type itself. The following are only computed if attachment_type == "iscsi".
 			"chap_secret": {
 				Type:     schema.TypeString,
 				Computed: true,
@@ -77,8 +107,7 @@ func VolumeAttachmentResource() *schema.Resource {
 				Type:     schema.TypeString,
 				Computed: true,
 			},
-			"iqn": {
-				// iSCSI Qualified Name per RFC 3720
+			"iqn": { // iSCSI Qualified Name per RFC 3720
 				Type:     schema.TypeString,
 				Computed: true,
 			},
@@ -90,93 +119,240 @@ func VolumeAttachmentResource() *schema.Resource {
 	}
 }
 
-func createVolumeAttachment(d *schema.ResourceData, m interface{}) (e error) {
-	client := m.(*OracleClients)
+func createVolumeAttachment(d *schema.ResourceData, m interface{}) error {
 	sync := &VolumeAttachmentResourceCrud{}
 	sync.D = d
-	sync.Client = client.client
+	sync.Client = m.(*OracleClients).computeClient
+
 	return crud.CreateResource(d, sync)
 }
 
-func readVolumeAttachment(d *schema.ResourceData, m interface{}) (e error) {
-	client := m.(*OracleClients)
+func readVolumeAttachment(d *schema.ResourceData, m interface{}) error {
 	sync := &VolumeAttachmentResourceCrud{}
 	sync.D = d
-	sync.Client = client.client
+	sync.Client = m.(*OracleClients).computeClient
+
 	return crud.ReadResource(sync)
 }
 
-func deleteVolumeAttachment(d *schema.ResourceData, m interface{}) (e error) {
-	client := m.(*OracleClients)
+func deleteVolumeAttachment(d *schema.ResourceData, m interface{}) error {
 	sync := &VolumeAttachmentResourceCrud{}
 	sync.D = d
-	sync.Client = client.clientWithoutNotFoundRetries
+	sync.Client = m.(*OracleClients).computeClient
+	sync.DisableNotFoundRetries = true
+
 	return crud.DeleteResource(d, sync)
 }
 
 type VolumeAttachmentResourceCrud struct {
 	crud.BaseCrud
-	Res *baremetal.VolumeAttachment
+	Client                 *oci_core.ComputeClient
+	Res                    *oci_core.VolumeAttachment
+	DisableNotFoundRetries bool
 }
 
 func (s *VolumeAttachmentResourceCrud) ID() string {
-	return s.Res.ID
+	volumeAttachment := *s.Res
+	return *volumeAttachment.GetId()
 }
 
 func (s *VolumeAttachmentResourceCrud) CreatedPending() []string {
-	return []string{baremetal.ResourceAttaching}
+	return []string{
+		string(oci_core.VolumeAttachmentLifecycleStateAttaching),
+	}
 }
 
 func (s *VolumeAttachmentResourceCrud) CreatedTarget() []string {
-	return []string{baremetal.ResourceAttached}
+	return []string{
+		string(oci_core.VolumeAttachmentLifecycleStateAttached),
+	}
 }
 
 func (s *VolumeAttachmentResourceCrud) DeletedPending() []string {
-	return []string{baremetal.ResourceDetaching}
+	return []string{
+		string(oci_core.VolumeAttachmentLifecycleStateDetaching),
+	}
 }
 
 func (s *VolumeAttachmentResourceCrud) DeletedTarget() []string {
-	return []string{baremetal.ResourceDetached}
-}
-
-func (s *VolumeAttachmentResourceCrud) State() string {
-	return s.Res.State
-}
-
-func (s *VolumeAttachmentResourceCrud) Create() (e error) {
-	attachmentType := s.D.Get("attachment_type").(string)
-	instanceID := s.D.Get("instance_id").(string)
-	volumeID := s.D.Get("volume_id").(string)
-
-	s.Res, e = s.Client.AttachVolume(attachmentType, instanceID, volumeID, nil)
-
-	return
-}
-
-func (s *VolumeAttachmentResourceCrud) Get() (e error) {
-	res, e := s.Client.GetVolumeAttachment(s.D.Id())
-	if e == nil {
-		s.Res = res
+	return []string{
+		string(oci_core.VolumeAttachmentLifecycleStateDetached),
 	}
-	return
+}
+
+func (s *VolumeAttachmentResourceCrud) Create() error {
+	request := oci_core.AttachVolumeRequest{}
+
+	request.AttachVolumeDetails = mapToAttachVolumeDetails(s.D)
+
+	request.RequestMetadata.RetryPolicy = getRetryPolicy(s.DisableNotFoundRetries, "core")
+
+	response, err := s.Client.AttachVolume(context.Background(), request)
+	if err != nil {
+		return err
+	}
+
+	s.Res = &response.VolumeAttachment
+	return nil
+}
+
+func (s *VolumeAttachmentResourceCrud) Get() error {
+	request := oci_core.GetVolumeAttachmentRequest{}
+
+	tmp := s.D.Id()
+	request.VolumeAttachmentId = &tmp
+
+	request.RequestMetadata.RetryPolicy = getRetryPolicy(s.DisableNotFoundRetries, "core")
+
+	response, err := s.Client.GetVolumeAttachment(context.Background(), request)
+	if err != nil {
+		return err
+	}
+
+	s.Res = &response.VolumeAttachment
+	return nil
+}
+
+func (s *VolumeAttachmentResourceCrud) Delete() error {
+	request := oci_core.DetachVolumeRequest{}
+
+	tmp := s.D.Id()
+	request.VolumeAttachmentId = &tmp
+
+	request.RequestMetadata.RetryPolicy = getRetryPolicy(s.DisableNotFoundRetries, "core")
+
+	_, err := s.Client.DetachVolume(context.Background(), request)
+	return err
 }
 
 func (s *VolumeAttachmentResourceCrud) SetData() {
-	s.D.Set("attachment_type", s.Res.AttachmentType)
-	s.D.Set("availability_domain", s.Res.AvailabilityDomain)
-	s.D.Set("compartment_id", s.Res.CompartmentID)
-	s.D.Set("display_name", s.Res.DisplayName)
-	s.D.Set("instance_id", s.Res.InstanceID)
-	s.D.Set("state", s.Res.State)
-	s.D.Set("time_created", s.Res.TimeCreated.String())
-	s.D.Set("volume_id", s.Res.VolumeID)
-	s.D.Set("chap_secret", s.Res.CHAPSecret)
-	s.D.Set("chap_username", s.Res.CHAPUsername)
-	s.D.Set("ipv4", s.Res.IPv4)
-	s.D.Set("iqn", s.Res.IQN)
-	s.D.Set("port", s.Res.Port)
+	volumeAttachment := *s.Res
+
+	if availabilityDomain := volumeAttachment.GetAvailabilityDomain(); availabilityDomain != nil {
+		s.D.Set("availability_domain", *availabilityDomain)
+	}
+
+	if compartmentId := volumeAttachment.GetCompartmentId(); compartmentId != nil {
+		s.D.Set("compartment_id", *compartmentId)
+	}
+
+	if displayName := volumeAttachment.GetDisplayName(); displayName != nil {
+		s.D.Set("display_name", *displayName)
+	}
+
+	if id := volumeAttachment.GetId(); id != nil {
+		s.D.Set("id", *id)
+	}
+
+	if instanceId := volumeAttachment.GetInstanceId(); instanceId != nil {
+		s.D.Set("instance_id", *instanceId)
+	}
+
+	if isReadOnly := volumeAttachment.GetIsReadOnly(); isReadOnly != nil {
+		s.D.Set("is_read_only", *isReadOnly)
+	}
+
+	s.D.Set("state", volumeAttachment.GetLifecycleState())
+
+	if timeCreated := volumeAttachment.GetTimeCreated(); timeCreated != nil {
+		s.D.Set("time_created", timeCreated.String())
+	}
+
+	if volumeId := volumeAttachment.GetVolumeId(); volumeId != nil {
+		s.D.Set("volume_id", *volumeId)
+	}
+
+	switch v := volumeAttachment.(type) {
+	case oci_core.IScsiVolumeAttachment:
+		s.D.Set("attachment_type", IScsiVolumeAttachmentDiscriminator)
+
+		// IScsiVolumeAttachment-specific fields:
+		if v.ChapSecret != nil {
+			s.D.Set("chap_secret", *v.ChapSecret)
+		}
+
+		if v.ChapUsername != nil {
+			s.D.Set("chap_username", *v.ChapUsername)
+		}
+
+		if v.Ipv4 != nil {
+			s.D.Set("ipv4", *v.Ipv4)
+		}
+
+		if v.Iqn != nil {
+			s.D.Set("iqn", *v.Iqn)
+		}
+
+		if v.Port != nil {
+			s.D.Set("port", *v.Port)
+		}
+	case oci_core.ParavirtualizedVolumeAttachment:
+		s.D.Set("attachment_type", ParavirtualizedVolumeAttachmentDiscriminator)
+	default:
+		log.Printf("[WARN] Received volume attachment of unknown type")
+	}
 }
 
-func (s *VolumeAttachmentResourceCrud) Delete() (e error) {
-	return s.Client.DetachVolume(s.D.Id(), nil)
+func mapToAttachVolumeDetails(d *schema.ResourceData) oci_core.AttachVolumeDetails {
+	attachmentType := d.Get("attachment_type").(string)
+
+	switch strings.ToLower(attachmentType) {
+	case strings.ToLower(IScsiVolumeAttachmentDiscriminator):
+		result := oci_core.AttachIScsiVolumeDetails{}
+
+		if displayName, ok := d.GetOkExists("display_name"); ok {
+			tmp := displayName.(string)
+			result.DisplayName = &tmp
+		}
+
+		if instanceId, ok := d.GetOkExists("instance_id"); ok {
+			tmp := instanceId.(string)
+			result.InstanceId = &tmp
+		}
+
+		if isReadOnly, ok := d.GetOkExists("is_read_only"); ok {
+			tmp := isReadOnly.(bool)
+			result.IsReadOnly = &tmp
+		}
+
+		if useChap, ok := d.GetOkExists("use_chap"); ok {
+			tmp := useChap.(bool)
+			result.UseChap = &tmp
+		}
+
+		if volumeId, ok := d.GetOkExists("volume_id"); ok {
+			tmp := volumeId.(string)
+			result.VolumeId = &tmp
+		}
+
+		return result
+	case strings.ToLower(ParavirtualizedVolumeAttachmentDiscriminator):
+		result := oci_core.AttachParavirtualizedVolumeDetails{}
+
+		if displayName, ok := d.GetOkExists("display_name"); ok {
+			tmp := displayName.(string)
+			result.DisplayName = &tmp
+		}
+
+		if instanceId, ok := d.GetOkExists("instance_id"); ok {
+			tmp := instanceId.(string)
+			result.InstanceId = &tmp
+		}
+
+		if isReadOnly, ok := d.GetOkExists("is_read_only"); ok {
+			tmp := isReadOnly.(bool)
+			result.IsReadOnly = &tmp
+		}
+
+		if volumeId, ok := d.GetOkExists("volume_id"); ok {
+			tmp := volumeId.(string)
+			result.VolumeId = &tmp
+		}
+
+		return result
+	default:
+		log.Printf("[WARN] Unknown attachment_type '%v' was specified", attachmentType)
+	}
+
+	return nil
 }

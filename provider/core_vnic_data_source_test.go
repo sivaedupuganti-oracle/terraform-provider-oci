@@ -7,24 +7,20 @@ import (
 
 	"github.com/hashicorp/terraform/helper/resource"
 	"github.com/hashicorp/terraform/terraform"
-	baremetal "github.com/oracle/bmcs-go-sdk"
+	"github.com/oracle/oci-go-sdk/core"
 	"github.com/stretchr/testify/suite"
 )
 
 type DatasourceCoreVnicTestSuite struct {
 	suite.Suite
-	Client       *baremetal.Client
 	Config       string
-	Provider     terraform.ResourceProvider
 	Providers    map[string]terraform.ResourceProvider
 	ResourceName string
 }
 
 func (s *DatasourceCoreVnicTestSuite) SetupTest() {
-	s.Client = testAccClient
-	s.Provider = testAccProvider
 	s.Providers = testAccProviders
-	s.Config = testProviderConfig() + instanceDnsConfig
+	s.Config = legacyTestProviderConfig() + instanceDnsConfig
 	s.ResourceName = "data.oci_core_vnic.t"
 }
 
@@ -43,8 +39,9 @@ func (s *DatasourceCoreVnicTestSuite) TestAccDatasourceCoreAttachVnic_basic() {
 				data "oci_core_vnic" "t" {
 					vnic_id = "${lookup(data.oci_core_vnic_attachments.t.vnic_attachments[0],"vnic_id")}"
 				}`,
-				Check: resource.ComposeTestCheckFunc(
+				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet(s.ResourceName, "id"),
+					resource.TestCheckResourceAttrSet(s.ResourceName, "vnic_id"),
 					resource.TestCheckResourceAttrSet(s.ResourceName, "compartment_id"),
 					resource.TestCheckResourceAttrSet(s.ResourceName, "subnet_id"),
 					resource.TestCheckResourceAttrSet(s.ResourceName, "availability_domain"),
@@ -56,7 +53,9 @@ func (s *DatasourceCoreVnicTestSuite) TestAccDatasourceCoreAttachVnic_basic() {
 					resource.TestCheckResourceAttr(s.ResourceName, "hostname_label", "testinstance"),
 					resource.TestCheckResourceAttr(s.ResourceName, "is_primary", "true"),
 					resource.TestCheckResourceAttr(s.ResourceName, "skip_source_dest_check", "false"),
-					resource.TestCheckResourceAttr(s.ResourceName, "state", baremetal.ResourceAvailable),
+					resource.TestCheckResourceAttr(s.ResourceName, "state", string(core.VnicLifecycleStateAvailable)),
+					resource.TestCheckResourceAttr(s.ResourceName, "defined_tags.%", "1"),
+					resource.TestCheckResourceAttr(s.ResourceName, "freeform_tags.%", "1"),
 				),
 			},
 		},

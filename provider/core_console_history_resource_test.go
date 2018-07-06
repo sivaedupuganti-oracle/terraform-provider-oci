@@ -8,26 +8,25 @@ import (
 	"github.com/hashicorp/terraform/helper/resource"
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/hashicorp/terraform/terraform"
-	"github.com/oracle/bmcs-go-sdk"
 
+	"fmt"
+
+	"github.com/oracle/oci-go-sdk/core"
 	"github.com/stretchr/testify/suite"
 )
 
 type ResourceCoreConsoleHistoryTestSuite struct {
 	suite.Suite
-	Client       *baremetal.Client
 	Config       string
 	Provider     terraform.ResourceProvider
 	Providers    map[string]terraform.ResourceProvider
-	Res          *baremetal.ConsoleHistoryMetadata
 	ResourceName string
 }
 
 func (s *ResourceCoreConsoleHistoryTestSuite) SetupTest() {
-	s.Client = testAccClient
 	s.Provider = testAccProvider
 	s.Providers = testAccProviders
-	s.Config = testProviderConfig() + instanceConfig
+	s.Config = legacyTestProviderConfig() + instanceConfig + DefinedTagsDependencies
 
 	p := s.Provider.(*schema.Provider)
 	res := p.ResourcesMap["oci_core_console_history"]
@@ -36,20 +35,10 @@ func (s *ResourceCoreConsoleHistoryTestSuite) SetupTest() {
 	}
 
 	s.ResourceName = "oci_core_console_history.t"
-	s.Res = &baremetal.ConsoleHistoryMetadata{
-		AvailabilityDomain: "availability_domain",
-		CompartmentID:      "compartmentid",
-		DisplayName:        "display_name",
-		InstanceID:         "instance_id",
-		ID:                 "id",
-		State:              baremetal.ResourceSucceeded,
-	}
-	s.Res.ETag = "etag"
-	s.Res.RequestID = "opcrequestid"
 }
 
 func (s *ResourceCoreConsoleHistoryTestSuite) TestAccResourceCoreInstanceConsoleHistory_basic() {
-
+	var consoleHistoryId string
 	resource.Test(s.T(), resource.TestCase{
 		Providers: s.Providers,
 		Steps: []resource.TestStep{
@@ -59,9 +48,54 @@ func (s *ResourceCoreConsoleHistoryTestSuite) TestAccResourceCoreInstanceConsole
 				Config: s.Config + `
 				resource "oci_core_console_history" "t" {
 					instance_id = "${oci_core_instance.t.id}"
+
+					#Optional
+					defined_tags = "${map(
+									"${oci_identity_tag_namespace.tag-namespace1.name}.${oci_identity_tag.tag1.name}", "value"
+									)}"
+                    freeform_tags = { "Department" = "Accounting"}
 				}`,
-				Check: resource.ComposeTestCheckFunc(
+				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet(s.ResourceName, "id"),
+					resource.TestCheckResourceAttrSet(s.ResourceName, "instance_id"),
+					resource.TestCheckResourceAttrSet(s.ResourceName, "compartment_id"),
+					resource.TestCheckResourceAttrSet(s.ResourceName, "display_name"),
+					resource.TestCheckResourceAttr(s.ResourceName, "defined_tags.%", "1"),
+					resource.TestCheckResourceAttr(s.ResourceName, "freeform_tags.%", "1"),
+					resource.TestCheckResourceAttrSet(s.ResourceName, "availability_domain"),
+					resource.TestCheckResourceAttr(s.ResourceName, "state", string(core.ConsoleHistoryLifecycleStateSucceeded)),
+					resource.TestCheckResourceAttrSet(s.ResourceName, "time_created"),
+					func(ts *terraform.State) (err error) {
+						consoleHistoryId, err = fromInstanceState(ts, s.ResourceName, "id")
+						return err
+					},
+				),
+			},
+			{
+				ImportState:       true,
+				ImportStateVerify: true,
+				Config: s.Config + `
+				resource "oci_core_console_history" "t" {
+					instance_id = "${oci_core_instance.t.id}"
+
+					#Optional
+					display_name = "updatedDisplayName"
+					defined_tags = "${map(
+									"${oci_identity_tag_namespace.tag-namespace1.name}.${oci_identity_tag.tag1.name}", "updatedValue"
+									)}"
+                    freeform_tags = { "Department" = "Finance"}
+				}`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet(s.ResourceName, "display_name"),
+					resource.TestCheckResourceAttr(s.ResourceName, "defined_tags.%", "1"),
+					resource.TestCheckResourceAttr(s.ResourceName, "freeform_tags.%", "1"),
+					func(ts *terraform.State) (err error) {
+						newId, err := fromInstanceState(ts, s.ResourceName, "id")
+						if newId != consoleHistoryId {
+							return fmt.Errorf("expected same console history ocid, got different")
+						}
+						return err
+					},
 				),
 			},
 		},

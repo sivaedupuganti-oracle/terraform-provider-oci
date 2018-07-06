@@ -3,29 +3,24 @@
 package provider
 
 import (
-	"testing"
-
 	"regexp"
+	"testing"
 
 	"github.com/hashicorp/terraform/helper/resource"
 	"github.com/hashicorp/terraform/terraform"
-	"github.com/oracle/bmcs-go-sdk"
+	"github.com/oracle/oci-go-sdk/identity"
 	"github.com/stretchr/testify/suite"
 )
 
 type DatasourceIdentityAvailabilityDomainsTestSuite struct {
 	suite.Suite
-	Client       *baremetal.Client
 	Config       string
-	Provider     terraform.ResourceProvider
 	Providers    map[string]terraform.ResourceProvider
 	ResourceName string
-	List         *baremetal.ListAvailabilityDomains
+	List         identity.ListAvailabilityDomainsResponse
 }
 
 func (s *DatasourceIdentityAvailabilityDomainsTestSuite) SetupTest() {
-	s.Client = testAccClient
-	s.Provider = testAccProvider
 	s.Providers = testAccProviders
 	s.Config = testProviderConfig()
 	s.ResourceName = "data.oci_identity_availability_domains.t"
@@ -40,9 +35,9 @@ func (s *DatasourceIdentityAvailabilityDomainsTestSuite) TestAccIdentityAvailabi
 			{
 				Config: s.Config + `
 				data "oci_identity_availability_domains" "t" {
-					compartment_id = "${var.compartment_id}"
+					compartment_id = "${var.tenancy_ocid}"
 				}`,
-				Check: resource.ComposeTestCheckFunc(
+				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(s.ResourceName, "availability_domains.#", "3"),
 					resource.TestMatchResourceAttr(s.ResourceName, "availability_domains.0.name", regexp.MustCompile(`\w*-AD-1`)),
 					resource.TestMatchResourceAttr(s.ResourceName, "availability_domains.1.name", regexp.MustCompile(`\w*-AD-2`)),
@@ -53,14 +48,14 @@ func (s *DatasourceIdentityAvailabilityDomainsTestSuite) TestAccIdentityAvailabi
 			{
 				Config: s.Config + `
 				data "oci_identity_availability_domains" "t" {
-					compartment_id = "${var.compartment_id}"
+					compartment_id = "${var.tenancy_ocid}"
 					filter {
 						name = "name"
 						values = ["\\w*-AD-2"]
 						regex = true
 					}
 				}`,
-				Check: resource.ComposeTestCheckFunc(
+				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(s.ResourceName, "availability_domains.#", "1"),
 					resource.TestMatchResourceAttr(s.ResourceName, "availability_domains.0.name", regexp.MustCompile(".*AD-2")),
 				),

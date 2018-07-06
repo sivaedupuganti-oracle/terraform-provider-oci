@@ -3,12 +3,15 @@
 package provider
 
 import (
-	"time"
+	"context"
+	"fmt"
+	"log"
 
 	"github.com/hashicorp/terraform/helper/schema"
-	"github.com/oracle/bmcs-go-sdk"
 
 	"github.com/oracle/terraform-provider-oci/crud"
+
+	oci_core "github.com/oracle/oci-go-sdk/core"
 )
 
 func SubnetResource() *schema.Resource {
@@ -22,6 +25,7 @@ func SubnetResource() *schema.Resource {
 		Update:   updateSubnet,
 		Delete:   deleteSubnet,
 		Schema: map[string]*schema.Schema{
+			// Required
 			"availability_domain": {
 				Type:     schema.TypeString,
 				Required: true,
@@ -37,54 +41,81 @@ func SubnetResource() *schema.Resource {
 				Required: true,
 				ForceNew: true,
 			},
-			"dhcp_options_id": {
-				Type:     schema.TypeString,
-				Required: true,
-				ForceNew: true,
-			},
-			"route_table_id": {
-				Type:     schema.TypeString,
-				Required: true,
-				ForceNew: true,
-			},
-			"security_list_ids": {
-				Type:     schema.TypeSet,
-				Required: true,
-				ForceNew: true,
-				Set:      schema.HashString,
-				Elem: &schema.Schema{
-					Type: schema.TypeString,
-				},
-			},
 			"vcn_id": {
 				Type:     schema.TypeString,
 				Required: true,
 				ForceNew: true,
 			},
+
 			// Optional
-			"dns_label": {
-				Type:             schema.TypeString,
+			"defined_tags": {
+				Type:             schema.TypeMap,
 				Optional:         true,
-				ForceNew:         true,
-				DiffSuppressFunc: crud.EqualIgnoreCaseSuppressDiff,
+				Computed:         true,
+				DiffSuppressFunc: definedTagsDiffSuppressFunction,
+				Elem:             schema.TypeString,
+			},
+			"dhcp_options_id": {
+				Type:     schema.TypeString,
+				Optional: true,
+				Computed: true,
+				ForceNew: true,
 			},
 			"display_name": {
 				Type:     schema.TypeString,
 				Optional: true,
 				Computed: true,
 			},
+			"dns_label": {
+				Type:             schema.TypeString,
+				Optional:         true,
+				Computed:         true,
+				ForceNew:         true,
+				DiffSuppressFunc: crud.EqualIgnoreCaseSuppressDiff,
+			},
+			"freeform_tags": {
+				Type:     schema.TypeMap,
+				Optional: true,
+				Computed: true,
+				Elem:     schema.TypeString,
+			},
 			"prohibit_public_ip_on_vnic": {
 				Type:     schema.TypeBool,
 				Optional: true,
-				Default:  false,
+				Computed: true,
 				ForceNew: true,
 			},
+			"route_table_id": {
+				Type:     schema.TypeString,
+				Optional: true,
+				Computed: true,
+				ForceNew: true,
+			},
+			"security_list_ids": {
+				// @CODEGEN: The ordering of security_list_ids may change, but shouldn't result in a diff.
+				// Change it to a TypeSet instead of TypeList (as generated).
+				Type:     schema.TypeSet,
+				Optional: true,
+				Computed: true,
+				ForceNew: true,
+				MaxItems: 5,
+				MinItems: 0,
+				Set:      schema.HashString,
+				Elem: &schema.Schema{
+					Type: schema.TypeString,
+				},
+			},
+
 			// Computed
 			"id": {
 				Type:     schema.TypeString,
 				Computed: true,
 			},
 			"state": {
+				Type:     schema.TypeString,
+				Computed: true,
+			},
+			"subnet_domain_name": {
 				Type:     schema.TypeString,
 				Computed: true,
 			},
@@ -104,162 +135,290 @@ func SubnetResource() *schema.Resource {
 	}
 }
 
-func createSubnet(d *schema.ResourceData, m interface{}) (e error) {
+func createSubnet(d *schema.ResourceData, m interface{}) error {
 	sync := &SubnetResourceCrud{}
 	sync.D = d
-	sync.Client = m.(*OracleClients).client
+	sync.Client = m.(*OracleClients).virtualNetworkClient
+
 	return crud.CreateResource(d, sync)
 }
 
-func readSubnet(d *schema.ResourceData, m interface{}) (e error) {
+func readSubnet(d *schema.ResourceData, m interface{}) error {
 	sync := &SubnetResourceCrud{}
 	sync.D = d
-	sync.Client = m.(*OracleClients).client
+	sync.Client = m.(*OracleClients).virtualNetworkClient
+
 	return crud.ReadResource(sync)
 }
 
-func updateSubnet(d *schema.ResourceData, m interface{}) (e error) {
-	client := m.(*OracleClients)
+func updateSubnet(d *schema.ResourceData, m interface{}) error {
 	sync := &SubnetResourceCrud{}
 	sync.D = d
-	sync.Client = client.client
-	return crud.UpdateResource(sync.D, sync)
+	sync.Client = m.(*OracleClients).virtualNetworkClient
+
+	return crud.UpdateResource(d, sync)
 }
 
-func deleteSubnet(d *schema.ResourceData, m interface{}) (e error) {
+func deleteSubnet(d *schema.ResourceData, m interface{}) error {
 	sync := &SubnetResourceCrud{}
 	sync.D = d
-	sync.Client = m.(*OracleClients).clientWithoutNotFoundRetries
+	sync.Client = m.(*OracleClients).virtualNetworkClient
+	sync.DisableNotFoundRetries = true
+
 	return crud.DeleteResource(d, sync)
 }
 
 type SubnetResourceCrud struct {
 	crud.BaseCrud
-	Resource *baremetal.Subnet
+	Client                 *oci_core.VirtualNetworkClient
+	Res                    *oci_core.Subnet
+	DisableNotFoundRetries bool
 }
 
 func (s *SubnetResourceCrud) ID() string {
-	return s.Resource.ID
+	return *s.Res.Id
 }
 
 func (s *SubnetResourceCrud) CreatedPending() []string {
-	return []string{baremetal.ResourceProvisioning}
+	return []string{
+		string(oci_core.SubnetLifecycleStateProvisioning),
+	}
 }
 
 func (s *SubnetResourceCrud) CreatedTarget() []string {
-	return []string{baremetal.ResourceAvailable}
+	return []string{
+		string(oci_core.SubnetLifecycleStateAvailable),
+	}
 }
 
 func (s *SubnetResourceCrud) DeletedPending() []string {
-	return []string{baremetal.ResourceTerminating}
+	return []string{
+		string(oci_core.SubnetLifecycleStateTerminating),
+	}
 }
 
 func (s *SubnetResourceCrud) DeletedTarget() []string {
-	return []string{baremetal.ResourceTerminated}
+	return []string{
+		string(oci_core.SubnetLifecycleStateTerminated),
+	}
 }
 
-func (s *SubnetResourceCrud) ExtraWaitPostCreateDelete() time.Duration {
-	return time.Duration(25 * time.Second)
-}
+func (s *SubnetResourceCrud) Create() error {
+	request := oci_core.CreateSubnetRequest{}
 
-func (s *SubnetResourceCrud) Create() (e error) {
-	availabilityDomain := s.D.Get("availability_domain").(string)
-	cidrBlock := s.D.Get("cidr_block").(string)
-	compartmentID := s.D.Get("compartment_id").(string)
-	vcnID := s.D.Get("vcn_id").(string)
-
-	opts := &baremetal.CreateSubnetOptions{}
-	if dhcpOptionsID, ok := s.D.GetOk("dhcp_options_id"); ok {
-		opts.DHCPOptionsID = dhcpOptionsID.(string)
-	}
-	if dnsLabel, ok := s.D.GetOk("dns_label"); ok {
-		opts.DNSLabel = dnsLabel.(string)
-	}
-	if displayName, ok := s.D.GetOk("display_name"); ok {
-		opts.DisplayName = displayName.(string)
+	if availabilityDomain, ok := s.D.GetOkExists("availability_domain"); ok {
+		tmp := availabilityDomain.(string)
+		request.AvailabilityDomain = &tmp
 	}
 
-	dnsLabel, ok := s.D.GetOk("dns_label")
-	if ok {
-		opts.DNSLabel = dnsLabel.(string)
+	if cidrBlock, ok := s.D.GetOkExists("cidr_block"); ok {
+		tmp := cidrBlock.(string)
+		request.CidrBlock = &tmp
 	}
 
-	prohibitPublicIpOnVnic, ok := s.D.GetOk("prohibit_public_ip_on_vnic")
-	if ok {
-		opts.ProhibitPublicIpOnVnic = prohibitPublicIpOnVnic.(bool)
+	if compartmentId, ok := s.D.GetOkExists("compartment_id"); ok {
+		tmp := compartmentId.(string)
+		request.CompartmentId = &tmp
 	}
 
-	if rawSecurityListIDs, ok := s.D.GetOk("security_list_ids"); ok {
-		securityListIDs := []string{}
-		for _, val := range rawSecurityListIDs.(*schema.Set).List() {
-			securityListIDs = append(securityListIDs, val.(string))
+	if definedTags, ok := s.D.GetOkExists("defined_tags"); ok {
+		convertedDefinedTags, err := mapToDefinedTags(definedTags.(map[string]interface{}))
+		if err != nil {
+			return err
 		}
-		opts.SecurityListIDs = securityListIDs
+		request.DefinedTags = convertedDefinedTags
 	}
 
-	if routeTableID, ok := s.D.GetOk("route_table_id"); ok {
-		opts.RouteTableID = routeTableID.(string)
+	if dhcpOptionsId, ok := s.D.GetOkExists("dhcp_options_id"); ok {
+		tmp := dhcpOptionsId.(string)
+		request.DhcpOptionsId = &tmp
 	}
 
-	s.Resource, e = s.Client.CreateSubnet(
-		availabilityDomain,
-		cidrBlock,
-		compartmentID,
-		vcnID,
-		opts,
-	)
+	if displayName, ok := s.D.GetOkExists("display_name"); ok {
+		tmp := displayName.(string)
+		request.DisplayName = &tmp
+	}
 
-	return
+	if dnsLabel, ok := s.D.GetOkExists("dns_label"); ok {
+		tmp := dnsLabel.(string)
+		request.DnsLabel = &tmp
+	}
+
+	if freeformTags, ok := s.D.GetOkExists("freeform_tags"); ok {
+		request.FreeformTags = objectMapToStringMap(freeformTags.(map[string]interface{}))
+	}
+
+	// TODO: GetOk malfunction with this bool: 'ok' is always the value of the bool
+	// newer versions of terraform support GetOkExists which should resolve this problem
+	prohibitPublicIpOnVnic := s.D.Get("prohibit_public_ip_on_vnic").(bool)
+	request.ProhibitPublicIpOnVnic = &prohibitPublicIpOnVnic
+
+	if routeTableId, ok := s.D.GetOkExists("route_table_id"); ok {
+		tmp := routeTableId.(string)
+		request.RouteTableId = &tmp
+	}
+
+	request.SecurityListIds = []string{}
+	if securityListIds, ok := s.D.GetOkExists("security_list_ids"); ok {
+		secListIdSet, assertOk := securityListIds.(*schema.Set)
+		if !assertOk {
+			return fmt.Errorf("Could not assert security_list_ids as type schema.Set")
+		}
+
+		interfaces := secListIdSet.List()
+		tmp := make([]string, len(interfaces))
+		for i, toBeConverted := range interfaces {
+			tmp[i] = toBeConverted.(string)
+		}
+		request.SecurityListIds = tmp
+	}
+
+	if vcnId, ok := s.D.GetOkExists("vcn_id"); ok {
+		tmp := vcnId.(string)
+		request.VcnId = &tmp
+	}
+
+	request.RequestMetadata.RetryPolicy = getRetryPolicy(s.DisableNotFoundRetries, "core")
+
+	response, err := s.Client.CreateSubnet(context.Background(), request)
+	if err != nil {
+		return err
+	}
+
+	s.Res = &response.Subnet
+	return nil
 }
 
-func (s *SubnetResourceCrud) Get() (e error) {
-	res, e := s.Client.GetSubnet(s.D.Id())
-	if e == nil {
-		s.Resource = res
+func (s *SubnetResourceCrud) Get() error {
+	request := oci_core.GetSubnetRequest{}
+
+	tmp := s.D.Id()
+	request.SubnetId = &tmp
+
+	request.RequestMetadata.RetryPolicy = getRetryPolicy(s.DisableNotFoundRetries, "core")
+
+	response, err := s.Client.GetSubnet(context.Background(), request)
+	if err != nil {
+		return err
 	}
-	return
+
+	s.Res = &response.Subnet
+	return nil
 }
 
-func (s *SubnetResourceCrud) Update() (e error) {
-	opts := &baremetal.IfMatchDisplayNameOptions{}
+func (s *SubnetResourceCrud) Update() error {
+	request := oci_core.UpdateSubnetRequest{}
 
-	displayName, ok := s.D.GetOk("display_name")
-	if ok {
-		opts.DisplayName = displayName.(string)
+	if definedTags, ok := s.D.GetOkExists("defined_tags"); ok {
+		convertedDefinedTags, err := mapToDefinedTags(definedTags.(map[string]interface{}))
+		if err != nil {
+			return err
+		}
+		request.DefinedTags = convertedDefinedTags
 	}
 
-	s.Resource, e = s.Client.UpdateSubnet(s.D.Id(), opts)
-	return
+	if displayName, ok := s.D.GetOkExists("display_name"); ok {
+		tmp := displayName.(string)
+		request.DisplayName = &tmp
+	}
+
+	if freeformTags, ok := s.D.GetOkExists("freeform_tags"); ok {
+		request.FreeformTags = objectMapToStringMap(freeformTags.(map[string]interface{}))
+	}
+
+	tmp := s.D.Id()
+	request.SubnetId = &tmp
+
+	request.RequestMetadata.RetryPolicy = getRetryPolicy(s.DisableNotFoundRetries, "core")
+
+	response, err := s.Client.UpdateSubnet(context.Background(), request)
+	if err != nil {
+		return err
+	}
+
+	s.Res = &response.Subnet
+	return nil
+}
+
+func (s *SubnetResourceCrud) Delete() error {
+	request := oci_core.DeleteSubnetRequest{}
+
+	tmp := s.D.Id()
+	request.SubnetId = &tmp
+
+	request.RequestMetadata.RetryPolicy = getRetryPolicy(s.DisableNotFoundRetries, "core")
+
+	_, err := s.Client.DeleteSubnet(context.Background(), request)
+	return err
 }
 
 func (s *SubnetResourceCrud) SetData() {
-	s.D.Set("availability_domain", s.Resource.AvailabilityDomain)
-	s.D.Set("compartment_id", s.Resource.CompartmentID)
-	s.D.Set("display_name", s.Resource.DisplayName)
-	s.D.Set("dns_label", s.Resource.DNSLabel)
-	s.D.Set("cidr_block", s.Resource.CIDRBlock)
-	s.D.Set("dhcp_options_id", s.Resource.DHCPOptionsID)
-	s.D.Set("dns_label", s.Resource.DNSLabel)
-	s.D.Set("prohibit_public_ip_on_vnic", s.Resource.ProhibitPublicIpOnVnic)
-	s.D.Set("route_table_id", s.Resource.RouteTableID)
-	s.D.Set("vcn_id", s.Resource.VcnID)
-	s.D.Set("security_list_ids", makeSetFromStrings(s.Resource.SecurityListIDs))
-	s.D.Set("state", s.Resource.State)
-	s.D.Set("time_created", s.Resource.TimeCreated.String())
-	s.D.Set("virtual_router_ip", s.Resource.VirtualRouterIP)
-	s.D.Set("virtual_router_mac", s.Resource.VirtualRouterMac)
-}
-
-func (s *SubnetResourceCrud) Delete() (e error) {
-	return s.Client.DeleteSubnet(s.D.Id(), nil)
-}
-
-// makeSetFromStrings encodes an []string into a
-// *schema.Set in the appropriate structure for the schema
-func makeSetFromStrings(ss []string) *schema.Set {
-	st := &schema.Set{F: schema.HashString}
-	for _, s := range ss {
-		st.Add(s)
+	if s.Res.AvailabilityDomain != nil {
+		s.D.Set("availability_domain", *s.Res.AvailabilityDomain)
 	}
-	return st
+
+	if s.Res.CidrBlock != nil {
+		s.D.Set("cidr_block", *s.Res.CidrBlock)
+	}
+
+	if s.Res.CompartmentId != nil {
+		s.D.Set("compartment_id", *s.Res.CompartmentId)
+	}
+
+	if s.Res.DefinedTags != nil {
+		s.D.Set("defined_tags", definedTagsToMap(s.Res.DefinedTags))
+	}
+
+	if s.Res.DhcpOptionsId != nil {
+		s.D.Set("dhcp_options_id", *s.Res.DhcpOptionsId)
+	}
+
+	if s.Res.DisplayName != nil {
+		s.D.Set("display_name", *s.Res.DisplayName)
+	}
+
+	if s.Res.DnsLabel != nil {
+		s.D.Set("dns_label", *s.Res.DnsLabel)
+	}
+
+	s.D.Set("freeform_tags", s.Res.FreeformTags)
+
+	if s.Res.Id != nil {
+		s.D.Set("id", *s.Res.Id)
+	}
+
+	if s.Res.ProhibitPublicIpOnVnic != nil {
+		s.D.Set("prohibit_public_ip_on_vnic", *s.Res.ProhibitPublicIpOnVnic)
+	}
+
+	if s.Res.RouteTableId != nil {
+		s.D.Set("route_table_id", *s.Res.RouteTableId)
+	}
+
+	if err := s.D.Set("security_list_ids", crud.StringsToSet(s.Res.SecurityListIds)); err != nil {
+		log.Printf("Unable to set security_list_ids. Error: %q", err)
+	}
+
+	s.D.Set("state", s.Res.LifecycleState)
+
+	if s.Res.SubnetDomainName != nil {
+		s.D.Set("subnet_domain_name", *s.Res.SubnetDomainName)
+	}
+
+	if s.Res.TimeCreated != nil {
+		s.D.Set("time_created", s.Res.TimeCreated.String())
+	}
+
+	if s.Res.VcnId != nil {
+		s.D.Set("vcn_id", *s.Res.VcnId)
+	}
+
+	if s.Res.VirtualRouterIp != nil {
+		s.D.Set("virtual_router_ip", *s.Res.VirtualRouterIp)
+	}
+
+	if s.Res.VirtualRouterMac != nil {
+		s.D.Set("virtual_router_mac", *s.Res.VirtualRouterMac)
+	}
+
 }

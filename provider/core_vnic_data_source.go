@@ -3,20 +3,23 @@
 package provider
 
 import (
+	"context"
+
 	"github.com/hashicorp/terraform/helper/schema"
-	"github.com/oracle/bmcs-go-sdk"
+	oci_core "github.com/oracle/oci-go-sdk/core"
 
 	"github.com/oracle/terraform-provider-oci/crud"
 )
 
-func VnicDatasource() *schema.Resource {
+func VnicDataSource() *schema.Resource {
 	return &schema.Resource{
-		Read: readVnic,
+		Read: readSingularVnic,
 		Schema: map[string]*schema.Schema{
 			"vnic_id": {
 				Type:     schema.TypeString,
 				Required: true,
 			},
+			// Computed
 			"availability_domain": {
 				Type:     schema.TypeString,
 				Computed: true,
@@ -25,15 +28,26 @@ func VnicDatasource() *schema.Resource {
 				Type:     schema.TypeString,
 				Computed: true,
 			},
-			"id": {
-				Type:     schema.TypeString,
-				Computed: true,
+			"defined_tags": {
+				Type:             schema.TypeMap,
+				Computed:         true,
+				DiffSuppressFunc: definedTagsDiffSuppressFunction,
+				Elem:             schema.TypeString,
 			},
 			"display_name": {
 				Type:     schema.TypeString,
 				Computed: true,
 			},
+			"freeform_tags": {
+				Type:     schema.TypeMap,
+				Computed: true,
+				Elem:     schema.TypeString,
+			},
 			"hostname_label": {
+				Type:     schema.TypeString,
+				Computed: true,
+			},
+			"id": {
 				Type:     schema.TypeString,
 				Computed: true,
 			},
@@ -42,10 +56,6 @@ func VnicDatasource() *schema.Resource {
 				Computed: true,
 			},
 			"mac_address": {
-				Type:     schema.TypeString,
-				Computed: true,
-			},
-			"state": {
 				Type:     schema.TypeString,
 				Computed: true,
 			},
@@ -61,6 +71,10 @@ func VnicDatasource() *schema.Resource {
 				Type:     schema.TypeBool,
 				Computed: true,
 			},
+			"state": {
+				Type:     schema.TypeString,
+				Computed: true,
+			},
 			"subnet_id": {
 				Type:     schema.TypeString,
 				Computed: true,
@@ -73,42 +87,109 @@ func VnicDatasource() *schema.Resource {
 	}
 }
 
-func readVnic(d *schema.ResourceData, m interface{}) (e error) {
-	client := m.(*OracleClients)
-	sync := &VnicDatasourceCrud{}
+func readSingularVnic(d *schema.ResourceData, m interface{}) error {
+	sync := &VnicDataSourceCrud{}
 	sync.D = d
-	sync.Client = client.client
+	sync.Client = m.(*OracleClients).virtualNetworkClient
+
 	return crud.ReadResource(sync)
 }
 
-type VnicDatasourceCrud struct {
-	crud.BaseCrud
-	Resource *baremetal.Vnic
+type VnicDataSourceCrud struct {
+	D      *schema.ResourceData
+	Client *oci_core.VirtualNetworkClient
+	Res    *oci_core.GetVnicResponse
 }
 
-func (v *VnicDatasourceCrud) Get() (e error) {
-	id := v.D.Get("vnic_id").(string)
-
-	v.Resource, e = v.Client.GetVnic(id)
-	return
+func (s *VnicDataSourceCrud) VoidState() {
+	s.D.SetId("")
 }
 
-func (v *VnicDatasourceCrud) SetData() {
-	if v.Resource != nil {
-		v.D.SetId(v.Resource.ID)
-		v.D.Set("id", v.Resource.ID)
-		v.D.Set("availability_domain", v.Resource.AvailabilityDomain)
-		v.D.Set("compartment_id", v.Resource.CompartmentID)
-		v.D.Set("display_name", v.Resource.DisplayName)
-		v.D.Set("hostname_label", v.Resource.HostnameLabel)
-		v.D.Set("is_primary", v.Resource.IsPrimary)
-		v.D.Set("mac_address", v.Resource.MacAddress)
-		v.D.Set("state", v.Resource.State)
-		v.D.Set("private_ip_address", v.Resource.PrivateIPAddress)
-		v.D.Set("public_ip_address", v.Resource.PublicIPAddress)
-		v.D.Set("skip_source_dest_check", v.Resource.SkipSourceDestCheck)
-		v.D.Set("subnet_id", v.Resource.SubnetID)
-		v.D.Set("time_created", v.Resource.TimeCreated.String())
+func (s *VnicDataSourceCrud) Get() error {
+	request := oci_core.GetVnicRequest{}
+
+	if vnicId, ok := s.D.GetOkExists("vnic_id"); ok {
+		tmp := vnicId.(string)
+		request.VnicId = &tmp
 	}
+
+	request.RequestMetadata.RetryPolicy = getRetryPolicy(false, "core")
+
+	response, err := s.Client.GetVnic(context.Background(), request)
+	if err != nil {
+		return err
+	}
+
+	s.Res = &response
+	return nil
+}
+
+func (s *VnicDataSourceCrud) SetData() {
+	if s.Res == nil {
+		return
+	}
+
+	// @CODEGEN 1/2018: In most generated data sources, the ID is set to the current time stamp.
+	// In the case of this datasource, the existing provider sets it to the resource ID.
+	// This happens because it only supports a Get operation that returns 1 item.
+	// Let's keep this as is to avoid potential breaking changes.
+	s.D.SetId(*s.Res.Id)
+
+	if s.Res.AvailabilityDomain != nil {
+		s.D.Set("availability_domain", *s.Res.AvailabilityDomain)
+	}
+
+	if s.Res.CompartmentId != nil {
+		s.D.Set("compartment_id", *s.Res.CompartmentId)
+	}
+
+	if s.Res.DefinedTags != nil {
+		s.D.Set("defined_tags", definedTagsToMap(s.Res.DefinedTags))
+	}
+
+	if s.Res.DisplayName != nil {
+		s.D.Set("display_name", *s.Res.DisplayName)
+	}
+
+	s.D.Set("freeform_tags", s.Res.FreeformTags)
+
+	if s.Res.HostnameLabel != nil {
+		s.D.Set("hostname_label", *s.Res.HostnameLabel)
+	}
+
+	if s.Res.Id != nil {
+		s.D.Set("id", *s.Res.Id)
+	}
+
+	if s.Res.IsPrimary != nil {
+		s.D.Set("is_primary", *s.Res.IsPrimary)
+	}
+
+	if s.Res.MacAddress != nil {
+		s.D.Set("mac_address", *s.Res.MacAddress)
+	}
+
+	if s.Res.PrivateIp != nil {
+		s.D.Set("private_ip_address", *s.Res.PrivateIp)
+	}
+
+	if s.Res.PublicIp != nil {
+		s.D.Set("public_ip_address", *s.Res.PublicIp)
+	}
+
+	if s.Res.SkipSourceDestCheck != nil {
+		s.D.Set("skip_source_dest_check", *s.Res.SkipSourceDestCheck)
+	}
+
+	s.D.Set("state", s.Res.LifecycleState)
+
+	if s.Res.SubnetId != nil {
+		s.D.Set("subnet_id", *s.Res.SubnetId)
+	}
+
+	if s.Res.TimeCreated != nil {
+		s.D.Set("time_created", s.Res.TimeCreated.String())
+	}
+
 	return
 }

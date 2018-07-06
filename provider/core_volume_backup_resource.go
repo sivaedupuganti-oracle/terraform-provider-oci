@@ -3,10 +3,13 @@
 package provider
 
 import (
+	"context"
+
 	"github.com/hashicorp/terraform/helper/schema"
-	"github.com/oracle/bmcs-go-sdk"
 
 	"github.com/oracle/terraform-provider-oci/crud"
+
+	oci_core "github.com/oracle/oci-go-sdk/core"
 )
 
 func VolumeBackupResource() *schema.Resource {
@@ -20,30 +23,68 @@ func VolumeBackupResource() *schema.Resource {
 		Update:   updateVolumeBackup,
 		Delete:   deleteVolumeBackup,
 		Schema: map[string]*schema.Schema{
+			// Required
+			"volume_id": {
+				Type:     schema.TypeString,
+				Required: true,
+				ForceNew: true,
+			},
+
+			// Optional
+			"defined_tags": {
+				Type:             schema.TypeMap,
+				Optional:         true,
+				Computed:         true,
+				DiffSuppressFunc: definedTagsDiffSuppressFunction,
+				Elem:             schema.TypeString,
+			},
+			"display_name": {
+				Type:     schema.TypeString,
+				Optional: true,
+				Computed: true,
+			},
+			"freeform_tags": {
+				Type:     schema.TypeMap,
+				Optional: true,
+				Computed: true,
+				Elem:     schema.TypeString,
+			},
+			"type": {
+				Type:     schema.TypeString,
+				Optional: true,
+				Computed: true,
+				ForceNew: true,
+			},
+
+			// Computed
 			"compartment_id": {
 				Type:     schema.TypeString,
 				Computed: true,
 			},
-			"display_name": {
+			"expiration_time": {
 				Type:     schema.TypeString,
 				Computed: true,
-				Optional: true,
 			},
 			"id": {
 				Type:     schema.TypeString,
 				Computed: true,
 			},
-			"state": {
-				Type:     schema.TypeString,
+			"size_in_gbs": {
+				Type:     schema.TypeInt,
 				Computed: true,
 			},
+			// @Deprecated 2017: size_in_mbs => size_in_gbs
 			"size_in_mbs": {
 				Type:       schema.TypeInt,
 				Computed:   true,
-				Deprecated: "This property is deprecated, please use size_in_gbs",
+				Deprecated: crud.FieldDeprecatedForAnother("size_in_mbs", "size_in_gbs"),
 			},
-			"size_in_gbs": {
-				Type:     schema.TypeInt,
+			"source_type": {
+				Type:     schema.TypeString,
+				Computed: true,
+			},
+			"state": {
+				Type:     schema.TypeString,
 				Computed: true,
 			},
 			"time_created": {
@@ -54,135 +95,249 @@ func VolumeBackupResource() *schema.Resource {
 				Type:     schema.TypeString,
 				Computed: true,
 			},
-			"unique_size_in_mbs": {
-				Type:       schema.TypeInt,
-				Computed:   true,
-				Deprecated: "This property is deprecated, please use unique_size_in_gbs",
-			},
 			"unique_size_in_gbs": {
 				Type:     schema.TypeInt,
 				Computed: true,
 			},
-			"volume_id": {
-				Type:     schema.TypeString,
-				Required: true,
-				ForceNew: true,
+			// @Deprecated 2017: unique_size_in_mbs => unique_size_in_gbs
+			"unique_size_in_mbs": {
+				Type:       schema.TypeInt,
+				Computed:   true,
+				Deprecated: crud.FieldDeprecatedForAnother("unique_size_in_mbs", "unique_size_in_gbs"),
 			},
 		},
 	}
 }
 
-func createVolumeBackup(d *schema.ResourceData, m interface{}) (e error) {
-	client := m.(*OracleClients)
+func createVolumeBackup(d *schema.ResourceData, m interface{}) error {
 	sync := &VolumeBackupResourceCrud{}
 	sync.D = d
-	sync.Client = client.client
+	sync.Client = m.(*OracleClients).blockstorageClient
+
 	return crud.CreateResource(d, sync)
 }
 
-func readVolumeBackup(d *schema.ResourceData, m interface{}) (e error) {
-	client := m.(*OracleClients)
+func readVolumeBackup(d *schema.ResourceData, m interface{}) error {
 	sync := &VolumeBackupResourceCrud{}
 	sync.D = d
-	sync.Client = client.client
+	sync.Client = m.(*OracleClients).blockstorageClient
+
 	return crud.ReadResource(sync)
 }
 
-func updateVolumeBackup(d *schema.ResourceData, m interface{}) (e error) {
-	client := m.(*OracleClients)
+func updateVolumeBackup(d *schema.ResourceData, m interface{}) error {
 	sync := &VolumeBackupResourceCrud{}
 	sync.D = d
-	sync.Client = client.client
+	sync.Client = m.(*OracleClients).blockstorageClient
+
 	return crud.UpdateResource(d, sync)
 }
 
-func deleteVolumeBackup(d *schema.ResourceData, m interface{}) (e error) {
-	client := m.(*OracleClients)
+func deleteVolumeBackup(d *schema.ResourceData, m interface{}) error {
 	sync := &VolumeBackupResourceCrud{}
 	sync.D = d
-	sync.Client = client.clientWithoutNotFoundRetries
+	sync.Client = m.(*OracleClients).blockstorageClient
+	sync.DisableNotFoundRetries = true
+
 	return crud.DeleteResource(d, sync)
 }
 
 type VolumeBackupResourceCrud struct {
 	crud.BaseCrud
-	Res *baremetal.VolumeBackup
+	Client                 *oci_core.BlockstorageClient
+	Res                    *oci_core.VolumeBackup
+	DisableNotFoundRetries bool
 }
 
 func (s *VolumeBackupResourceCrud) ID() string {
-	return s.Res.ID
+	return *s.Res.Id
 }
 
 func (s *VolumeBackupResourceCrud) CreatedPending() []string {
-	return []string{baremetal.ResourceRequestReceived, baremetal.ResourceCreating}
+	// Creating is considered "Created" because it can take some time to finish
+	// actually creating and uploading the backup.
+	return []string{
+		string(oci_core.VolumeBackupLifecycleStateCreating),
+		string(oci_core.VolumeBackupLifecycleStateRequestReceived),
+	}
 }
 
-// Creating is considered "Created" because it can take some time to finish
-// actually creating and uploading the backup.
 func (s *VolumeBackupResourceCrud) CreatedTarget() []string {
-	return []string{baremetal.ResourceAvailable}
+	return []string{
+		string(oci_core.VolumeBackupLifecycleStateAvailable),
+	}
 }
 
 func (s *VolumeBackupResourceCrud) DeletedPending() []string {
-	return []string{baremetal.ResourceTerminating}
+	return []string{
+		string(oci_core.VolumeBackupLifecycleStateTerminating),
+	}
 }
 
 func (s *VolumeBackupResourceCrud) DeletedTarget() []string {
-	return []string{baremetal.ResourceTerminated}
+	return []string{
+		string(oci_core.VolumeBackupLifecycleStateTerminated),
+	}
 }
 
-func (s *VolumeBackupResourceCrud) State() string {
-	return s.Res.State
-}
+func (s *VolumeBackupResourceCrud) Create() error {
+	request := oci_core.CreateVolumeBackupRequest{}
 
-func (s *VolumeBackupResourceCrud) Create() (e error) {
-	opts := &baremetal.CreateOptions{}
-	volumeID := s.D.Get("volume_id").(string)
-	displayName, ok := s.D.GetOk("display_name")
-	if ok {
-		opts.DisplayName = displayName.(string)
+	if definedTags, ok := s.D.GetOkExists("defined_tags"); ok {
+		convertedDefinedTags, err := mapToDefinedTags(definedTags.(map[string]interface{}))
+		if err != nil {
+			return err
+		}
+		request.DefinedTags = convertedDefinedTags
 	}
 
-	s.Res, e = s.Client.CreateVolumeBackup(volumeID, opts)
-
-	return
-}
-
-func (s *VolumeBackupResourceCrud) Get() (e error) {
-	res, e := s.Client.GetVolumeBackup(s.D.Id())
-	if e == nil {
-		s.Res = res
-	}
-	return
-}
-
-func (s *VolumeBackupResourceCrud) Update() (e error) {
-	opts := &baremetal.IfMatchDisplayNameOptions{}
-	displayName, ok := s.D.GetOk("display_name")
-	if ok {
-		opts.DisplayName = displayName.(string)
+	if displayName, ok := s.D.GetOkExists("display_name"); ok {
+		tmp := displayName.(string)
+		request.DisplayName = &tmp
 	}
 
-	s.Res, e = s.Client.UpdateVolumeBackup(s.D.Id(), opts)
+	if freeformTags, ok := s.D.GetOkExists("freeform_tags"); ok {
+		request.FreeformTags = objectMapToStringMap(freeformTags.(map[string]interface{}))
+	}
 
-	return
+	if type_, ok := s.D.GetOkExists("type"); ok {
+		request.Type = oci_core.CreateVolumeBackupDetailsTypeEnum(type_.(string))
+	}
+
+	if volumeId, ok := s.D.GetOkExists("volume_id"); ok {
+		tmp := volumeId.(string)
+		request.VolumeId = &tmp
+	}
+
+	request.RequestMetadata.RetryPolicy = getRetryPolicy(s.DisableNotFoundRetries, "core")
+
+	response, err := s.Client.CreateVolumeBackup(context.Background(), request)
+	if err != nil {
+		return err
+	}
+
+	s.Res = &response.VolumeBackup
+	return nil
+}
+
+func (s *VolumeBackupResourceCrud) Get() error {
+	request := oci_core.GetVolumeBackupRequest{}
+
+	tmp := s.D.Id()
+	request.VolumeBackupId = &tmp
+
+	request.RequestMetadata.RetryPolicy = getRetryPolicy(s.DisableNotFoundRetries, "core")
+
+	response, err := s.Client.GetVolumeBackup(context.Background(), request)
+	if err != nil {
+		return err
+	}
+
+	s.Res = &response.VolumeBackup
+	return nil
+}
+
+func (s *VolumeBackupResourceCrud) Update() error {
+	request := oci_core.UpdateVolumeBackupRequest{}
+
+	if definedTags, ok := s.D.GetOkExists("defined_tags"); ok {
+		convertedDefinedTags, err := mapToDefinedTags(definedTags.(map[string]interface{}))
+		if err != nil {
+			return err
+		}
+		request.DefinedTags = convertedDefinedTags
+	}
+
+	if displayName, ok := s.D.GetOkExists("display_name"); ok {
+		tmp := displayName.(string)
+		request.DisplayName = &tmp
+	}
+
+	if freeformTags, ok := s.D.GetOkExists("freeform_tags"); ok {
+		request.FreeformTags = objectMapToStringMap(freeformTags.(map[string]interface{}))
+	}
+
+	tmp := s.D.Id()
+	request.VolumeBackupId = &tmp
+
+	request.RequestMetadata.RetryPolicy = getRetryPolicy(s.DisableNotFoundRetries, "core")
+
+	response, err := s.Client.UpdateVolumeBackup(context.Background(), request)
+	if err != nil {
+		return err
+	}
+
+	s.Res = &response.VolumeBackup
+	return nil
+}
+
+func (s *VolumeBackupResourceCrud) Delete() error {
+	request := oci_core.DeleteVolumeBackupRequest{}
+
+	tmp := s.D.Id()
+	request.VolumeBackupId = &tmp
+
+	request.RequestMetadata.RetryPolicy = getRetryPolicy(s.DisableNotFoundRetries, "core")
+
+	_, err := s.Client.DeleteVolumeBackup(context.Background(), request)
+	return err
 }
 
 func (s *VolumeBackupResourceCrud) SetData() {
-	s.D.Set("compartment_id", s.Res.CompartmentID)
-	s.D.Set("display_name", s.Res.DisplayName)
-	s.D.Set("state", s.Res.State)
-	s.D.Set("size_in_mbs", s.Res.SizeInMBs)
-	s.D.Set("size_in_gbs", s.Res.SizeInGBs)
-	if !s.Res.TimeCreated.IsZero() {
+	if s.Res.CompartmentId != nil {
+		s.D.Set("compartment_id", *s.Res.CompartmentId)
+	}
+
+	if s.Res.DefinedTags != nil {
+		s.D.Set("defined_tags", definedTagsToMap(s.Res.DefinedTags))
+	}
+
+	if s.Res.DisplayName != nil {
+		s.D.Set("display_name", *s.Res.DisplayName)
+	}
+
+	if s.Res.ExpirationTime != nil {
+		s.D.Set("expiration_time", s.Res.ExpirationTime.String())
+	}
+
+	s.D.Set("freeform_tags", s.Res.FreeformTags)
+
+	if s.Res.Id != nil {
+		s.D.Set("id", *s.Res.Id)
+	}
+
+	if s.Res.SizeInGBs != nil {
+		s.D.Set("size_in_gbs", *s.Res.SizeInGBs)
+	}
+
+	if s.Res.SizeInMBs != nil {
+		s.D.Set("size_in_mbs", *s.Res.SizeInMBs)
+	}
+
+	s.D.Set("source_type", s.Res.SourceType)
+
+	s.D.Set("state", s.Res.LifecycleState)
+
+	if s.Res.TimeCreated != nil {
 		s.D.Set("time_created", s.Res.TimeCreated.String())
 	}
-	s.D.Set("time_request_received", s.Res.TimeCreated.String())
-	s.D.Set("unique_size_in_mbs", s.Res.UniqueSizeInMBs)
-	s.D.Set("unique_size_in_gbs", s.Res.UniqueSizeInGBs)
-	s.D.Set("volume_id", s.Res.VolumeID)
-}
 
-func (s *VolumeBackupResourceCrud) Delete() (e error) {
-	return s.Client.DeleteVolumeBackup(s.D.Id(), nil)
+	if s.Res.TimeRequestReceived != nil {
+		s.D.Set("time_request_received", s.Res.TimeRequestReceived.String())
+	}
+
+	s.D.Set("type", s.Res.Type)
+
+	if s.Res.UniqueSizeInGBs != nil {
+		s.D.Set("unique_size_in_gbs", *s.Res.UniqueSizeInGBs)
+	}
+
+	if s.Res.UniqueSizeInMbs != nil {
+		s.D.Set("unique_size_in_mbs", *s.Res.UniqueSizeInMbs)
+	}
+
+	if s.Res.VolumeId != nil {
+		s.D.Set("volume_id", *s.Res.VolumeId)
+	}
+
 }

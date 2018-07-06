@@ -2972,10 +2972,11 @@
 			"revisionTime": "2017-01-25T16:36:56Z"
 		},
 		{
-			"checksumSHA1": "7NJdzmaLu7qZ+LOGvg9vLjAAdBE=",
-			"path": "github.com/oracle/bmcs-go-sdk",
-			"revision": "1461ec54db86b0cbec11b2730d0ae31a26a7e73d",
-			"revisionTime": "2017-12-12T23:04:59Z"
+			"checksumSHA1": "60lUVhtmNY3XfLZpIY+11Ox9aEk=",
+			"path": "github.com/oracle/oci-go-sdk",
+			"revision": "099f958af07001fde0ac48f63aa275564e68acf6",
+			"revisionTime": "2018-06-15T17:03:48Z",
+			"tree": true
 		},
 		{
 			"checksumSHA1": "ImgLNIpeXsGjZGXw4rd+rwzQxpo=",

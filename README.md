@@ -27,45 +27,55 @@ The Terraform provider provides coverage for the entire OCI API, with some minor
 ## Getting started
 Be sure to read the FAQ and Writing Terraform configurations for OCI in [/docs](https://github.com/oracle/terraform-provider-oci/tree/master/docs).
 
-### Download Terraform
-Download the appropriate **v0.10.x binary** for your platform.  
-https://www.terraform.io/downloads.html
-
+## Installation
 **NOTE** Terraform v0.10.x introduces a change to plugin management where 
 previous v0.9.x configuration no longer applies. See note below.
 
+### On Oracle Linux 7.x
+```
+$ sudo yum install -y terraform terraform-provider-oci
+```
 
-### Install Terraform
+### Other platforms
+#### Download Terraform
+Download the appropriate **v0.10.x binary** for your platform.  
+https://www.terraform.io/downloads.html
+
+#### Install Terraform
 https://www.terraform.io/intro/getting-started/install.html
 
-### Get the Oracle Cloud Infrastructure Terraform provider
+#### Get the Oracle Cloud Infrastructure Terraform provider
 https://github.com/oracle/terraform-provider-oci/releases
 
 Unpack the provider. Terraform v0.10.x introduces a change to plugin 
 management where v0.9.x configuration no longer applies. To be compatible 
-with both terraform v0.9.x and v0.10.x, put the provider in the following 
-location:
+with both terraform v0.9.x and v0.10.x, do the following depending on your
+platform.
 
-#### On \*nix
+##### On \*nix other than Oracle Linux 7.x
+Copy the provider to the following location:
 ```
 ~/.terraform.d/plugins/
 ```
-
-Then create the `~/.terraformrc` file that specifies the path to the 
-`oci` provider **(only required for v0.9.x)**.
+###### For terraform v0.9.x only
+Create the `~/.terraformrc` file that specifies the path to the 
+`oci` provider.
 ```
 providers {
   oci = "~/.terraform.d/plugins/terraform-provider-oci"
 }
 ```
 
-#### On Windows
+##### On Windows
+Copy the provider to the following location:
 ```
 %APPDATA%/terraform.d/plugins/
 ```
+Note: `%APPDATA%` is a system path specific to your Windows version.
 
-Then create `%APPDATA%/terraform.rc` that specifies the path to the 
-`oci` provider **(only required for v0.9.x)**.
+###### For terraform v0.9.x only
+Create `%APPDATA%/terraform.rc` that specifies the path to the 
+`oci` provider.
 ```
 providers {
   oci = "%appdata%/terraform.d/plugins/terraform-provider-oci"
@@ -84,7 +94,7 @@ environments you may want to maintain multiple sets of environment
 variables. 
 See the [compute single instance example](https://github.com/oracle/terraform-provider-oci/tree/master/docs/examples/compute/instance) for more info.
 
-In your ~/.bash_profile set these variables
+In your `~/.bash_profile` set these variables
 ```
 export TF_VAR_tenancy_ocid=
 export TF_VAR_user_ocid=
@@ -142,5 +152,3 @@ https://community.oracle.com/community/cloud_computing/bare-metal
 
 [Github issues](https://github.com/oracle/terraform-provider-oci/issues)
 
-## About the provider
-This provider was written on behalf of Oracle by [MustWin.](http://mustwin.com/)
